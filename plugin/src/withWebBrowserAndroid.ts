@@ -28,31 +28,63 @@ function addActivityToManifest(config: ExpoConfig) {
   return withAndroidManifest(config, (config) => {
     const manifest = config.modResults.manifest;
     const application = manifest?.application?.[0];
+    const activities = application?.activity;
 
-    for (const activity of application?.activity ?? []) {
-      if (activity.$['android:name'] === '.BrowserLauncherActivity') {
-        return config;
-      }
+    if (!activities) {
+      throw new Error("Android application activity list is missing");
     }
 
-    const theme = application?.activity?.[0]?.$['android:theme'];
-    application?.activity?.[0]['intent-filter']?.splice(0, 1);
+    if (activities.some((activity) => activity.$["android:name"] === ".BrowserLauncherActivity")) {
+      return config;
+    }
+
+    const mainActivity = activities.find((activity) =>
+      activity["intent-filter"]?.some((intentFilter) => {
+        const hasMainAction = intentFilter.action?.some(
+          (action) => action.$["android:name"] === "android.intent.action.MAIN"
+        );
+        const hasLauncherCategory = intentFilter.category?.some(
+          (category) =>
+            category.$["android:name"] === "android.intent.category.LAUNCHER"
+        );
+        return Boolean(hasMainAction && hasLauncherCategory);
+      })
+    );
+    const templateActivity = mainActivity ?? activities[0];
+    if (!templateActivity) {
+      throw new Error("Android application has no activity to clone");
+    }
+
+    const launcherFilterIndex = mainActivity?.["intent-filter"]?.findIndex(
+      (intentFilter) => {
+        const hasMainAction = intentFilter.action?.some(
+          (action) => action.$["android:name"] === "android.intent.action.MAIN"
+        );
+        const hasLauncherCategory = intentFilter.category?.some(
+          (category) =>
+            category.$["android:name"] === "android.intent.category.LAUNCHER"
+        );
+        return Boolean(hasMainAction && hasLauncherCategory);
+      }
+    ) ?? -1;
+    if (mainActivity && launcherFilterIndex >= 0) {
+      mainActivity["intent-filter"]?.splice(launcherFilterIndex, 1);
+    }
 
     const launcherActivity: ManifestActivity = {
       $: {
-        'android:name': '.BrowserLauncherActivity',
-        'android:theme': theme,
-        'android:exported': 'true',
+        "android:name": ".BrowserLauncherActivity",
+        "android:theme": templateActivity.$["android:theme"],
+        "android:exported": "true",
       },
-      'intent-filter': [
+      "intent-filter": [
         {
-          action: [{ $: { 'android:name': 'android.intent.action.MAIN' } }],
-          category: [{ $: { 'android:name': 'android.intent.category.LAUNCHER' } }],
+          action: [{ $: { "android:name": "android.intent.action.MAIN" } }],
+          category: [{ $: { "android:name": "android.intent.category.LAUNCHER" } }],
         },
       ],
     };
-
-    application?.activity?.push(launcherActivity);
+    activities.push(launcherActivity);
     return config;
   });
 }
